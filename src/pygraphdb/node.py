@@ -92,7 +92,11 @@ class Node:
         return self.properties.pop(key)
 
     def to_dict(self) -> dict[str, object]:
-        """Serialize this node to a plain dictionary.
+        """Write everything about this node onto an index card.
+
+        Like copying a party guest's wristband number, group, and details
+        onto a card you can file away -- turns the node into a plain
+        dictionary you can save to a file.
 
         Returns:
             A dictionary representation of this node.
@@ -106,7 +110,10 @@ class Node:
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> Node:
-        """Create a Node from a dictionary.
+        """Rebuild a node from the index card that to_dict wrote.
+
+        Like reading a filed-away card and bringing that party guest back --
+        turns a plain dictionary back into a real Node.
 
         Args:
             data: A dictionary with node_id, label, and properties keys.

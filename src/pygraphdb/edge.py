@@ -105,7 +105,11 @@ class Edge:
         return self.properties.pop(key)
 
     def to_dict(self) -> dict[str, object]:
-        """Serialize this edge to a plain dictionary.
+        """Write everything about this edge onto an index card.
+
+        Like noting on a card who shook hands with whom, what kind of
+        relationship it was, and when -- turns the edge into a plain
+        dictionary you can save to a file.
 
         Returns:
             A dictionary representation of this edge.
@@ -121,7 +125,11 @@ class Edge:
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> Edge:
-        """Create an Edge from a dictionary.
+        """Rebuild an edge from the index card that to_dict wrote.
+
+        Like reading a filed-away card and re-drawing that handshake
+        (arrow) between two people -- turns a plain dictionary back into
+        a real Edge.
 
         Args:
             data: A dictionary with edge fields.

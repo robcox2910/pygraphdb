@@ -117,11 +117,13 @@ def _execute_node_query(graph: Graph, match: re.Match[str]) -> list[Node]:
         msg = f"RETURN variable '{return_var}' not defined in MATCH"
         raise QuerySyntaxError(msg)
 
+    conditions = _parse_conditions(where_clause, {var_name})
+
     results: list[Node] = []
     for node in graph.get_all_nodes():
         if node.label != label:
             continue
-        if where_clause and not _evaluate_where(node, var_name, where_clause):
+        if not _node_matches(node, var_name, conditions):
             continue
         results.append(node)
     return results
@@ -149,49 +151,91 @@ def _execute_edge_query(graph: Graph, match: re.Match[str]) -> list[Node]:
         msg = f"RETURN variable '{return_var}' not defined in MATCH"
         raise QuerySyntaxError(msg)
 
+    # WHERE conditions may reference either the source or the target variable.
+    conditions = _parse_conditions(where_clause, {source_var, target_var})
+
     results: list[Node] = []
     seen_ids: set[str] = set()
 
     for node in graph.get_all_nodes():
         if node.label != source_label:
             continue
-        if where_clause and not _evaluate_where(node, source_var, where_clause):
+        if not _node_matches(node, source_var, conditions):
             continue
 
-        if return_var == source_var:
-            # Check that at least one matching edge exists
-            outgoing = graph.get_outgoing_edges(node.node_id)
-            has_matching_edge = any(e.rel_type == rel_type for e in outgoing)
-            if has_matching_edge and node.node_id not in seen_ids:
-                seen_ids.add(node.node_id)
-                results.append(node)
-        else:
-            # Return target nodes
-            for edge in graph.get_outgoing_edges(node.node_id):
-                if edge.rel_type == rel_type and edge.target_id not in seen_ids:
-                    seen_ids.add(edge.target_id)
-                    results.append(graph.get_node(edge.target_id))
+        for edge in graph.get_outgoing_edges(node.node_id):
+            if edge.rel_type != rel_type:
+                continue
+            target = graph.get_node(edge.target_id)
+            if not _node_matches(target, target_var, conditions):
+                continue
+
+            if return_var == source_var:
+                # One matching edge is enough to keep the source node.
+                if node.node_id not in seen_ids:
+                    seen_ids.add(node.node_id)
+                    results.append(node)
+                break
+            if target.node_id not in seen_ids:
+                seen_ids.add(target.node_id)
+                results.append(target)
 
     return results
 
 
-def _evaluate_where(node: Node, var_name: str, where_clause: str) -> bool:
-    """Evaluate a WHERE clause against a node.
+def _parse_conditions(
+    where_clause: str | None,
+    valid_vars: set[str],
+) -> list[tuple[str, str, str]]:
+    """Turn a raw WHERE clause into a list of (var, prop, value) conditions.
+
+    Args:
+        where_clause: The raw WHERE clause string, or None if there was no WHERE.
+        valid_vars: The variable names the query actually defines.
+
+    Returns:
+        A list of parsed conditions (empty if there was no WHERE clause).
+
+    Raises:
+        QuerySyntaxError: If a WHERE clause is present but nothing parses
+            (for example an unquoted value), or a condition refers to a
+            variable the query never defined.
+
+    """
+    if where_clause is None:
+        return []
+    conditions: list[tuple[str, str, str]] = _WHERE_CONDITION.findall(where_clause)
+    if not conditions:
+        msg = (
+            f"Cannot understand WHERE clause: {where_clause!r} "
+            '(values must be quoted, e.g. n.name = "Alice")'
+        )
+        raise QuerySyntaxError(msg)
+    for cond_var, _prop_name, _prop_value in conditions:
+        if cond_var not in valid_vars:
+            msg = f"WHERE refers to unknown variable '{cond_var}'"
+            raise QuerySyntaxError(msg)
+    return conditions
+
+
+def _node_matches(node: Node, var_name: str, conditions: list[tuple[str, str, str]]) -> bool:
+    """Check whether a node satisfies the conditions aimed at its variable.
+
+    Only conditions whose variable equals ``var_name`` apply here; conditions
+    for other variables are checked against their own nodes elsewhere.
 
     Args:
         node: The node to test.
-        var_name: The variable name used in the query.
-        where_clause: The raw WHERE clause string.
+        var_name: The variable this node is bound to.
+        conditions: All parsed WHERE conditions.
 
     Returns:
-        True if the node satisfies all conditions.
+        True if the node satisfies every condition aimed at ``var_name``.
 
     """
-    conditions = _WHERE_CONDITION.findall(where_clause)
     for cond_var, prop_name, prop_value in conditions:
         if cond_var != var_name:
             continue
-        actual = node.get_property(prop_name)
-        if str(actual) != prop_value:
+        if str(node.get_property(prop_name)) != prop_value:
             return False
     return True

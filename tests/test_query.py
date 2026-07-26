@@ -87,6 +87,22 @@ class TestEdgeQueries:
         # All KNOWS targets (Bob, Charlie from Alice; Charlie from Bob) -- deduplicated
         assert len(results) == TWO_RESULTS
 
+    def test_where_filters_on_target_variable(self) -> None:
+        """A WHERE condition on the target var filters the target, not everything."""
+        g = _build_query_graph()
+        # Only Alice -> Bob has a target named Bob, so exactly one result.
+        results = execute_query(g, 'MATCH (n:Person)-[:KNOWS]->(m) WHERE m.name = "Bob" RETURN m')
+        assert len(results) == ONE_RESULT
+        assert results[0].properties["name"] == "Bob"
+
+    def test_where_on_target_filters_returned_source(self) -> None:
+        """A WHERE on the target var also constrains which sources come back."""
+        g = _build_query_graph()
+        # Sources with a KNOWS edge to Bob: only Alice.
+        results = execute_query(g, 'MATCH (n:Person)-[:KNOWS]->(m) WHERE m.name = "Bob" RETURN n')
+        assert len(results) == ONE_RESULT
+        assert results[0].properties["name"] == "Alice"
+
 
 class TestQueryErrors:
     """Test query error handling."""
@@ -102,3 +118,15 @@ class TestQueryErrors:
         g = Graph()
         with pytest.raises(QuerySyntaxError):
             execute_query(g, "MATCH (n:Person) RETURN x")
+
+    def test_unquoted_where_value_raises(self) -> None:
+        """An unquoted WHERE value cannot be parsed and must not silently pass."""
+        g = _build_query_graph()
+        with pytest.raises(QuerySyntaxError):
+            execute_query(g, "MATCH (n:Person) WHERE n.name = Alice RETURN n")
+
+    def test_where_unknown_variable_raises(self) -> None:
+        """A WHERE condition on a variable the query never defines raises."""
+        g = _build_query_graph()
+        with pytest.raises(QuerySyntaxError):
+            execute_query(g, 'MATCH (n:Person) WHERE x.name = "Alice" RETURN n')
