@@ -323,3 +323,22 @@ class TestGraphSerialization:
         restored = Graph.from_dict(g.to_dict())
         assert restored.node_count == g.node_count
         assert restored.edge_count == g.edge_count
+
+    def test_from_dict_edge_to_missing_node_raises(self) -> None:
+        """An edge referencing a node that was not loaded raises NodeNotFoundError."""
+        data: dict[str, object] = {
+            "nodes": [
+                {"node_id": "1", "label": "Person", "properties": {}},
+            ],
+            "edges": [
+                {
+                    "edge_id": "e1",
+                    "source_id": "1",
+                    "target_id": "ghost",
+                    "rel_type": "KNOWS",
+                    "properties": {},
+                },
+            ],
+        }
+        with pytest.raises(NodeNotFoundError):
+            Graph.from_dict(data)

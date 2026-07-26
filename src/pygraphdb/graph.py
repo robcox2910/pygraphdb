@@ -408,7 +408,11 @@ class Graph:
         return self.in_degree(node_id) + self.out_degree(node_id)
 
     def to_dict(self) -> dict[str, object]:
-        """Serialize the entire graph to a dictionary.
+        """Copy the whole whiteboard onto paper so it can be saved.
+
+        Like photographing your classroom whiteboard: every Post-it note
+        (node) and every line (edge) is written down into a plain
+        dictionary you can store in a file and rebuild later.
 
         Returns:
             A dictionary with "nodes" and "edges" keys.
@@ -421,13 +425,22 @@ class Graph:
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> Graph:
-        """Create a Graph from a dictionary.
+        """Rebuild a whole whiteboard from the paper copy made by to_dict.
+
+        Like re-drawing your classroom whiteboard from a photo: it puts
+        back every Post-it note (node) and then every line (edge). Each
+        line must connect two notes that really exist, otherwise the
+        drawing makes no sense.
 
         Args:
             data: A dictionary with "nodes" and "edges" lists.
 
         Returns:
             A new Graph instance.
+
+        Raises:
+            NodeNotFoundError: If an edge refers to a node that is not
+                present in the data.
 
         """
         graph = cls()
@@ -444,5 +457,11 @@ class Graph:
                 if isinstance(item, dict):
                     edge_data: dict[str, object] = {str(k): v for k, v in item.items()}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
                     edge = Edge.from_dict(edge_data)
+                    if edge.source_id not in graph._nodes:
+                        msg = f"Source node '{edge.source_id}' not found"
+                        raise NodeNotFoundError(msg)
+                    if edge.target_id not in graph._nodes:
+                        msg = f"Target node '{edge.target_id}' not found"
+                        raise NodeNotFoundError(msg)
                     graph._edges[edge.edge_id] = edge
         return graph

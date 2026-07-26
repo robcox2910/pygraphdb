@@ -38,9 +38,11 @@ class DuplicateNodeError(GraphError):
 
 
 class DuplicateEdgeError(GraphError):
-    """Raise when trying to add an edge that already exists.
+    """Raise when trying to add an edge whose id is already taken.
 
-    Like recording the same friendship twice in your contact list.
+    Like giving two different roads the exact same street sign -- an edge
+    with this id already exists. (Two separate roads between the same pair
+    of buildings are fine, as long as each has its own sign.)
     """
 
 
