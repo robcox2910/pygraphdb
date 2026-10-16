@@ -26,6 +26,7 @@ Example:
 import json
 from pathlib import Path
 
+from pygraphdb.atomic import atomic_write_text
 from pygraphdb.graph import Graph
 
 
@@ -42,7 +43,7 @@ def save_graph(graph: Graph, file_path: str | Path) -> None:
     """
     path = Path(file_path)
     data = graph.to_dict()
-    path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+    atomic_write_text(path, json.dumps(data, indent=2, default=str))
 
 
 def load_graph(file_path: str | Path) -> Graph:
