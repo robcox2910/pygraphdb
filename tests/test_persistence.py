@@ -1,6 +1,9 @@
 """Test saving and loading graphs to/from JSON."""
 
+import os
 from pathlib import Path
+
+import pytest
 
 from pygraphdb.graph import Graph
 from pygraphdb.persistence import graph_from_json, graph_to_json, load_graph, save_graph
@@ -82,3 +85,36 @@ class TestJsonSerialization:
         restored = graph_from_json(graph_to_json(g))
         assert restored.get_node("1").properties["name"] == "Alice"
         assert restored.get_edge("e1").rel_type == "KNOWS"
+
+
+class _SimulatedCrashError(OSError):
+    """Stands in for the power going out part-way through a save."""
+
+
+def test_interrupted_save_keeps_the_previous_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: a crash mid-save used to leave a truncated, unloadable file."""
+    graph = Graph()
+    graph.add_node("a")
+    path = tmp_path / "data.json"
+    save_graph(graph, path)
+    before = path.read_bytes()
+    graph.add_node("b")
+
+    def write_half_then_crash(self: Path, data: str, *_args: object, **_kwargs: object) -> int:
+        with self.open("w", encoding="utf-8") as handle:
+            handle.write(data[: len(data) // 2])
+        raise _SimulatedCrashError
+
+    def crash(*_args: object) -> None:
+        raise _SimulatedCrashError
+
+    monkeypatch.setattr(Path, "write_text", write_half_then_crash)
+    monkeypatch.setattr(os, "replace", crash)
+    with pytest.raises(_SimulatedCrashError):
+        save_graph(graph, path)
+    monkeypatch.undo()
+    assert path.read_bytes() == before
+    load_graph(path)
+    assert [p.name for p in tmp_path.iterdir()] == ["data.json"]
