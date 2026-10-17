@@ -32,3 +32,21 @@ g.add_edge("e2", "bob", "alice", rel_type="FRIENDS_WITH")
 ## Multiple Relationships
 
 Two nodes can have multiple edges between them! Alice might KNOW Bob (they've met) AND WORK_WITH Bob (they're lab partners). Each relationship is a separate edge with its own type and properties.
+
+## Every Node Keeps Its Own Address Book
+
+How do you find someone's friends? The slow way is to read *every*
+friendship in the whole school and pick out the ones that mention them.
+That gets slower and slower as the school grows.
+
+PyGraphDB does it the fast way: every node keeps its own little **address
+book** -- one list of the edges going out from it and one list of the edges
+coming in. Asking "who are Alice's friends?" just opens Alice's address book.
+It doesn't matter if the school has ten friendships or ten million; it's
+just as quick.
+
+Real graph databases (like Neo4j) call this **index-free adjacency**, and
+it's the whole reason they're good at following connections. Every time an
+edge is added or removed, both end nodes' address books are updated, so they
+never get out of step. Neighbours come back in the order their edges were
+added, so you get the same answer every time.

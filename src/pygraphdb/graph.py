@@ -38,12 +38,41 @@ class Graph:
     - The Graph keeps a directory of all buildings and all roads
 
     You can add, look up, update, and remove both nodes and edges.
+
+    Every building also keeps its *own* list of roads leaving it and roads
+    arriving at it. So "who are my neighbours?" only looks at that one
+    building's roads -- never at every road in the city. Graph databases
+    call this **index-free adjacency**, and it's why they're fast at
+    following connections.
     """
 
     def __init__(self) -> None:
         """Initialize an empty graph."""
         self._nodes: dict[str, Node] = {}
         self._edges: dict[str, Edge] = {}
+        # node id -> ids of its outgoing / incoming edges. A dict with no
+        # values works as a set that remembers the order roads were built.
+        self._out: dict[str, dict[str, None]] = {}
+        self._in: dict[str, dict[str, None]] = {}
+
+    def _store_node(self, node: Node) -> None:
+        """File a node and give it empty road lists."""
+        self._nodes[node.node_id] = node
+        self._out[node.node_id] = {}
+        self._in[node.node_id] = {}
+
+    def _store_edge(self, edge: Edge) -> None:
+        """File an edge and add it to both end nodes' road lists."""
+        self._edges[edge.edge_id] = edge
+        self._out[edge.source_id][edge.edge_id] = None
+        self._in[edge.target_id][edge.edge_id] = None
+
+    def _discard_edge(self, edge_id: str) -> Edge:
+        """Remove an edge and cross it off both end nodes' road lists."""
+        edge = self._edges.pop(edge_id)
+        self._out[edge.source_id].pop(edge_id, None)
+        self._in[edge.target_id].pop(edge_id, None)
+        return edge
 
     @property
     def node_count(self) -> int:
@@ -82,7 +111,7 @@ class Graph:
             msg = f"Node '{node_id}' already exists"
             raise DuplicateNodeError(msg)
         node = Node(node_id=node_id, label=label, properties=properties or {})
-        self._nodes[node_id] = node
+        self._store_node(node)
         return node
 
     def get_node(self, node_id: str) -> Node:
@@ -157,13 +186,13 @@ class Graph:
 
         """
         node = self.get_node(node_id)
-        # Remove all edges connected to this node
-        edges_to_remove = [
-            eid for eid, edge in self._edges.items() if node_id in (edge.source_id, edge.target_id)
-        ]
-        for eid in edges_to_remove:
-            del self._edges[eid]
+        # Remove all edges connected to this node -- its own road lists say which.
+        for eid in [*self._out[node_id], *self._in[node_id]]:
+            if eid in self._edges:  # a loop edge appears in both lists
+                self._discard_edge(eid)
         del self._nodes[node_id]
+        del self._out[node_id]
+        del self._in[node_id]
         return node
 
     def get_all_nodes(self) -> list[Node]:
@@ -219,7 +248,7 @@ class Graph:
             rel_type=rel_type,
             properties=properties or {},
         )
-        self._edges[edge_id] = edge
+        self._store_edge(edge)
         return edge
 
     def get_edge(self, edge_id: str) -> Edge:
@@ -293,9 +322,8 @@ class Graph:
             EdgeNotFoundError: If the edge does not exist.
 
         """
-        edge = self.get_edge(edge_id)
-        del self._edges[edge_id]
-        return edge
+        self.get_edge(edge_id)  # Validate existence
+        return self._discard_edge(edge_id)
 
     def get_all_edges(self) -> list[Edge]:
         """Return a list of all edges in the graph.
@@ -322,7 +350,7 @@ class Graph:
 
         """
         self.get_node(node_id)  # Validate existence
-        return [e for e in self._edges.values() if e.source_id == node_id]
+        return [self._edges[eid] for eid in self._out[node_id]]
 
     def get_incoming_edges(self, node_id: str) -> list[Edge]:
         """Get all edges coming into a node.
@@ -338,7 +366,7 @@ class Graph:
 
         """
         self.get_node(node_id)  # Validate existence
-        return [e for e in self._edges.values() if e.target_id == node_id]
+        return [self._edges[eid] for eid in self._in[node_id]]
 
     def get_neighbors(
         self,
@@ -353,22 +381,23 @@ class Graph:
             direction: One of "outgoing", "incoming", or "both".
 
         Returns:
-            A list of neighboring nodes (no duplicates).
+            A list of neighboring nodes (no duplicates), in the order their
+            connecting edges were added -- outgoing first, then incoming.
 
         Raises:
             NodeNotFoundError: If the node does not exist.
 
         """
         self.get_node(node_id)  # Validate existence
-        neighbor_ids: set[str] = set()
+        # A dict keeps the first time we meet each neighbour, in road order:
+        # outgoing roads first, then incoming ones.
+        neighbor_ids: dict[str, None] = {}
         if direction in ("outgoing", "both"):
-            for edge in self._edges.values():
-                if edge.source_id == node_id:
-                    neighbor_ids.add(edge.target_id)
+            for eid in self._out[node_id]:
+                neighbor_ids[self._edges[eid].target_id] = None
         if direction in ("incoming", "both"):
-            for edge in self._edges.values():
-                if edge.target_id == node_id:
-                    neighbor_ids.add(edge.source_id)
+            for eid in self._in[node_id]:
+                neighbor_ids[self._edges[eid].source_id] = None
         return [self._nodes[nid] for nid in neighbor_ids]
 
     def out_degree(self, node_id: str) -> int:
@@ -450,8 +479,7 @@ class Graph:
             for item in raw_nodes:  # pyright: ignore[reportUnknownVariableType]
                 if isinstance(item, dict):
                     node_data: dict[str, object] = {str(k): v for k, v in item.items()}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
-                    node = Node.from_dict(node_data)
-                    graph._nodes[node.node_id] = node
+                    graph._store_node(Node.from_dict(node_data))
         if isinstance(raw_edges, list):
             for item in raw_edges:  # pyright: ignore[reportUnknownVariableType]
                 if isinstance(item, dict):
@@ -463,5 +491,5 @@ class Graph:
                     if edge.target_id not in graph._nodes:
                         msg = f"Target node '{edge.target_id}' not found"
                         raise NodeNotFoundError(msg)
-                    graph._edges[edge.edge_id] = edge
+                    graph._store_edge(edge)
         return graph
