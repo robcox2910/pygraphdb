@@ -52,3 +52,12 @@ class QuerySyntaxError(GraphError):
     Like writing a sentence with the words in the wrong order --
     the computer can't understand what you're asking.
     """
+
+
+class PersistenceError(GraphError):
+    """Raise when a saved graph can't be read back from disk.
+
+    Like opening your saved game and finding the file missing or
+    scrambled -- rather than starting an empty game and pretending all is
+    well, we stop and say which file is the problem.
+    """

@@ -25,9 +25,14 @@ Example:
 
 import json
 from pathlib import Path
+from typing import cast
 
 from pygraphdb.atomic import atomic_write_text
+from pygraphdb.errors import PersistenceError
 from pygraphdb.graph import Graph
+
+# Every real save file has these top-level keys; anything else isn't one of ours.
+_REQUIRED_KEYS = frozenset({"nodes", "edges"})
 
 
 def save_graph(graph: Graph, file_path: str | Path) -> None:
@@ -59,13 +64,32 @@ def load_graph(file_path: str | Path) -> Graph:
         A new Graph populated with the saved data.
 
     Raises:
-        FileNotFoundError: If the file does not exist.
+        PersistenceError: If the file is missing, unreadable, not valid JSON,
+            or not a valid save file.
 
     """
     path = Path(file_path)
-    raw = path.read_text(encoding="utf-8")
-    data: dict[str, object] = json.loads(raw)
-    return Graph.from_dict(data)
+    try:
+        data: object = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        msg = f"Could not read {path}: {exc}"
+        raise PersistenceError(msg) from exc
+    except json.JSONDecodeError as exc:
+        msg = f"Invalid JSON in {path}: {exc}"
+        raise PersistenceError(msg) from exc
+    if not isinstance(data, dict):
+        msg = f"{path} is not a valid save file: the top level must be an object"
+        raise PersistenceError(msg)
+    saved: dict[str, object] = {str(k): v for k, v in cast("dict[object, object]", data).items()}
+    missing = _REQUIRED_KEYS - saved.keys()
+    if missing:
+        msg = f"{path} is not a valid save file: missing {sorted(missing)}"
+        raise PersistenceError(msg)
+    try:
+        return Graph.from_dict(saved)
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        msg = f"{path} is not a valid save file: {exc}"
+        raise PersistenceError(msg) from exc
 
 
 def graph_to_json(graph: Graph) -> str:

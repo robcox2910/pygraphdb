@@ -30,6 +30,7 @@ from pygraphdb.errors import (
     EdgeNotFoundError,
     GraphError,
     NodeNotFoundError,
+    PersistenceError,
     QuerySyntaxError,
 )
 from pygraphdb.graph import Graph
@@ -50,6 +51,7 @@ __all__ = [
     "Node",
     # Errors
     "NodeNotFoundError",
+    "PersistenceError",
     "QuerySyntaxError",
     "all_paths",
     # Traversal
