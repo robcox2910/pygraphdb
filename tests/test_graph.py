@@ -342,3 +342,87 @@ class TestGraphSerialization:
         }
         with pytest.raises(NodeNotFoundError):
             Graph.from_dict(data)
+
+
+class _NoFullScans(dict[str, object]):
+    """An edge dictionary that refuses to be scanned from end to end."""
+
+    def values(self) -> object:  # type: ignore[override]
+        msg = "looked at every edge in the graph!"
+        raise AssertionError(msg)
+
+    def items(self) -> object:  # type: ignore[override]
+        msg = "looked at every edge in the graph!"
+        raise AssertionError(msg)
+
+
+def _brute_force(graph: Graph, node_id: str) -> tuple[set[str], set[str]]:
+    """Work out a node's outgoing and incoming edge ids the slow, obvious way."""
+    edges = graph.get_all_edges()
+    outgoing = {e.edge_id for e in edges if e.source_id == node_id}
+    incoming = {e.edge_id for e in edges if e.target_id == node_id}
+    return outgoing, incoming
+
+
+class TestAdjacencyIndex:
+    """Each node keeps its own list of roads, so lookups never scan the whole map."""
+
+    def test_lookups_only_touch_the_nodes_own_edges(self) -> None:
+        """Regression: neighbour lookups used to scan every edge in the graph."""
+        graph = Graph()
+        for node_id in ("a", "b", "c"):
+            graph.add_node(node_id)
+        graph.add_edge("ab", "a", "b")
+        graph.add_edge("ca", "c", "a")
+        graph._edges = _NoFullScans(graph._edges)  # pyright: ignore[reportAttributeAccessIssue, reportPrivateUsage]
+        assert [e.edge_id for e in graph.get_outgoing_edges("a")] == ["ab"]
+        assert [e.edge_id for e in graph.get_incoming_edges("a")] == ["ca"]
+        assert graph.degree("a") == TWO_EDGES
+        assert {n.node_id for n in graph.get_neighbors("a")} == {"b", "c"}
+
+    def test_neighbours_come_back_in_the_order_roads_were_built(self) -> None:
+        """Regression: neighbour order used to depend on set hashing (random)."""
+        graph = Graph()
+        for node_id in ("hub", "x", "y", "z"):
+            graph.add_node(node_id)
+        graph.add_edge("e1", "hub", "z")
+        graph.add_edge("e2", "y", "hub")
+        graph.add_edge("e3", "hub", "x")
+        assert [n.node_id for n in graph.get_neighbors("hub")] == ["z", "x", "y"]
+
+    def test_random_changes_keep_the_index_in_step(self) -> None:
+        """Hundreds of random adds and removes always agree with a brute-force scan."""
+        import random  # noqa: PLC0415
+
+        rng = random.Random(7)  # noqa: S311 -- seeded test data, not crypto
+        graph = Graph()
+        next_id = 0
+        for _ in range(600):
+            nodes = [n.node_id for n in graph.get_all_nodes()]
+            edges = [e.edge_id for e in graph.get_all_edges()]
+            roll = rng.random()
+            if roll < 0.3 or len(nodes) < 2:  # noqa: PLR2004
+                graph.add_node(f"n{next_id}")
+                next_id += 1
+            elif roll < 0.75:  # noqa: PLR2004
+                graph.add_edge(f"e{next_id}", rng.choice(nodes), rng.choice(nodes))
+                next_id += 1
+            elif roll < 0.9 and edges:  # noqa: PLR2004
+                graph.remove_edge(rng.choice(edges))
+            else:
+                graph.remove_node(rng.choice(nodes))
+            for node_id in [n.node_id for n in graph.get_all_nodes()]:
+                outgoing, incoming = _brute_force(graph, node_id)
+                assert {e.edge_id for e in graph.get_outgoing_edges(node_id)} == outgoing
+                assert {e.edge_id for e in graph.get_incoming_edges(node_id)} == incoming
+
+    def test_loaded_graph_has_a_working_index(self) -> None:
+        """A graph rebuilt from to_dict() can still look up its neighbours."""
+        graph = Graph()
+        graph.add_node("a")
+        graph.add_node("b")
+        graph.add_edge("ab", "a", "b")
+        loaded = Graph.from_dict(graph.to_dict())
+        assert [n.node_id for n in loaded.get_neighbors("a")] == ["b"]
+        loaded.remove_node("b")
+        assert loaded.get_outgoing_edges("a") == []
