@@ -6,8 +6,9 @@ edge, remove the other node, ask who its neighbours are -- and plays it on
 two things at once:
 
 - the real ``Graph``;
-- a **model**: a dict of nodes (id -> label) and a dict of edges
-  (id -> where it starts and ends), which we already trust to be right.
+- a **model**: a dict of nodes (id -> label and properties) and a dict of
+  edges (id -> where it starts and ends, its type and properties), which
+  we already trust to be right.
 
 After every step the two must agree, and BFS and DFS from every node must
 visit exactly the places the model says you can get to. If they ever
@@ -53,6 +54,10 @@ from tests.strategies import reachable_from
 # (The property tests in test_properties.py try ids of every shape.)
 FIRST_NODES = ["a", "b", "c", "d", "e"]
 
+# What the dicts write down about one node, and about one edge.
+type NodeNote = tuple[str, dict[str, object]]  # (label, properties)
+type EdgeNote = tuple[str, str, str, dict[str, object]]  # (from, to, type, properties)
+
 
 def node_names() -> st.SearchStrategy[str]:
     """Make one of the first node ids, or "f", which no story starts with."""
@@ -65,15 +70,22 @@ def edge_names() -> st.SearchStrategy[str]:
 
 
 def labels() -> st.SearchStrategy[str]:
-    """Make any node label, short."""
+    """Make any node label or relationship type, short."""
     return st.text(max_size=3)
+
+
+def property_bags() -> st.SearchStrategy[dict[str, object]]:
+    """Make a few properties, with keys "x" and "y" so updates overwrite as well as add."""
+    return st.dictionaries(
+        st.sampled_from(["x", "y"]), st.one_of(st.integers(), st.lists(st.integers())), max_size=2
+    )
 
 
 # --- The machine: one story, played on the graph and on two dicts -------------
 
 
 class GraphMachine(RuleBasedStateMachine):
-    """Play random adds, removes and lookups on a Graph and on two dicts side by side."""
+    """Play random adds, updates, removes and lookups on a Graph and on two dicts side by side."""
 
     # Bags of ids used earlier in the story, so later steps can join, read or
     # remove things that really are (or were) in the graph.
@@ -84,136 +96,181 @@ class GraphMachine(RuleBasedStateMachine):
         """Make an empty graph and two empty dicts (the first nodes go in just below)."""
         super().__init__()
         self.graph = Graph()
-        self.labels: dict[str, str] = {}
-        self.ends: dict[str, tuple[str, str]] = {}
+        self.node_notes: dict[str, NodeNote] = {}
+        self.edge_notes: dict[str, EdgeNote] = {}
 
     @initialize(target=nodes)
     def add_the_first_nodes(self) -> MultipleResults[str]:
         """Start both with the same five nodes and no edges, and remember their ids."""
         for node_id in FIRST_NODES:
             self.graph.add_node(node_id)
-            self.labels[node_id] = ""
+            self.node_notes[node_id] = ("", {})
         return multiple(*FIRST_NODES)
 
     def roads(self) -> dict[str, set[str]]:
         """Return the model as a dict of sets: each node, and every node one edge away."""
-        neighbours: dict[str, set[str]] = {node_id: set() for node_id in self.labels}
-        for source, target in self.ends.values():
+        neighbours: dict[str, set[str]] = {node_id: set() for node_id in self.node_notes}
+        for source, target, _, _ in self.edge_notes.values():
             neighbours[source].add(target)
         return neighbours
 
-    @rule(target=nodes, node_id=node_names(), label=labels())
-    def add_node(self, node_id: str, label: str) -> str:
+    @rule(target=nodes, node_id=node_names(), label=labels(), properties=property_bags())
+    def add_node(self, node_id: str, label: str, properties: dict[str, object]) -> str:
         """Add a node to both, or get DuplicateNodeError if the id is taken; remember the id."""
-        if node_id in self.labels:
+        if node_id in self.node_notes:
             with pytest.raises(DuplicateNodeError):
-                self.graph.add_node(node_id, label=label)
+                self.graph.add_node(node_id, label=label, properties=properties)
         else:
-            assert self.graph.add_node(node_id, label=label).node_id == node_id
-            self.labels[node_id] = label
+            assert (
+                self.graph.add_node(node_id, label=label, properties=properties).node_id == node_id
+            )
+            self.node_notes[node_id] = (label, dict(properties))
         return node_id
 
     # Both ends come from the bag of used node ids, so most edges join real
     # nodes; an id whose node has since been removed tries a missing end.
-    @rule(target=edges, edge_id=st.one_of(edges, edge_names()), source=nodes, destination=nodes)
-    def add_edge(self, edge_id: str, source: str, destination: str) -> str:
+    @rule(
+        target=edges,
+        edge_id=st.one_of(edges, edge_names()),
+        source=nodes,
+        destination=nodes,
+        rel_type=labels(),
+        properties=property_bags(),
+    )
+    def add_edge(
+        self,
+        edge_id: str,
+        source: str,
+        destination: str,
+        rel_type: str,
+        properties: dict[str, object],
+    ) -> str:
         """Draw an edge in both, or get the right error if the id is taken or an end is missing."""
-        if edge_id in self.ends:
+        if edge_id in self.edge_notes:
             with pytest.raises(DuplicateEdgeError):
                 self.graph.add_edge(edge_id, source, destination)
-        elif source not in self.labels or destination not in self.labels:
+        elif source not in self.node_notes or destination not in self.node_notes:
             with pytest.raises(NodeNotFoundError):
                 self.graph.add_edge(edge_id, source, destination)
         else:
-            self.graph.add_edge(edge_id, source, destination)
-            self.ends[edge_id] = (source, destination)
+            edge = self.graph.add_edge(
+                edge_id, source, destination, rel_type=rel_type, properties=properties
+            )
+            assert (edge.edge_id, edge.source_id, edge.target_id) == (edge_id, source, destination)
+            self.edge_notes[edge_id] = (source, destination, rel_type, dict(properties))
         return edge_id
 
-    @rule(node_id=st.one_of(nodes, node_names()), label=labels())
-    def relabel_node(self, node_id: str, label: str) -> None:
-        """Give a node a new label in both, or get NodeNotFoundError if it isn't there."""
-        if node_id not in self.labels:
+    @rule(node_id=st.one_of(nodes, node_names()), label=labels(), properties=property_bags())
+    def update_node(self, node_id: str, label: str, properties: dict[str, object]) -> None:
+        """Relabel a node and merge in some properties, or get NodeNotFoundError if it's not there."""
+        if node_id not in self.node_notes:
             with pytest.raises(NodeNotFoundError):
-                self.graph.update_node(node_id, label=label)
+                self.graph.update_node(node_id, label=label, properties=properties)
             return
-        self.graph.update_node(node_id, label=label)
-        self.labels[node_id] = label
+        _, old_properties = self.node_notes[node_id]
+        self.node_notes[node_id] = (label, {**old_properties, **properties})
+        node = self.graph.update_node(node_id, label=label, properties=properties)
+        assert (node.label, node.properties) == self.node_notes[node_id]
+
+    @rule(edge_id=st.one_of(edges, edge_names()), rel_type=labels(), properties=property_bags())
+    def update_edge(self, edge_id: str, rel_type: str, properties: dict[str, object]) -> None:
+        """Retype an edge and merge in some properties, or get EdgeNotFoundError if it's not there."""
+        if edge_id not in self.edge_notes:
+            with pytest.raises(EdgeNotFoundError):
+                self.graph.update_edge(edge_id, rel_type=rel_type, properties=properties)
+            return
+        source, target, _, old_properties = self.edge_notes[edge_id]
+        self.edge_notes[edge_id] = (source, target, rel_type, {**old_properties, **properties})
+        edge = self.graph.update_edge(edge_id, rel_type=rel_type, properties=properties)
+        assert (edge.rel_type, edge.properties) == self.edge_notes[edge_id][2:]
 
     @rule(node_id=st.one_of(nodes, node_names()))
     def remove_node(self, node_id: str) -> None:
         """Remove a node, and every edge touching it, from both."""
-        if node_id not in self.labels:
+        if node_id not in self.node_notes:
             with pytest.raises(NodeNotFoundError):
                 self.graph.remove_node(node_id)
             return
         assert self.graph.remove_node(node_id).node_id == node_id
-        del self.labels[node_id]
-        self.ends = {
-            edge_id: (source, target)
-            for edge_id, (source, target) in self.ends.items()
-            if node_id not in (source, target)
+        del self.node_notes[node_id]
+        self.edge_notes = {
+            edge_id: note
+            for edge_id, note in self.edge_notes.items()
+            if node_id not in (note[0], note[1])
         }
 
     @rule(edge_id=st.one_of(edges, edge_names()))
     def remove_edge(self, edge_id: str) -> None:
         """Remove an edge from both, or get EdgeNotFoundError if it isn't there."""
-        if edge_id not in self.ends:
+        if edge_id not in self.edge_notes:
             with pytest.raises(EdgeNotFoundError):
                 self.graph.remove_edge(edge_id)
             return
         assert self.graph.remove_edge(edge_id).edge_id == edge_id
-        del self.ends[edge_id]
+        del self.edge_notes[edge_id]
 
     @rule(node_id=st.one_of(nodes, node_names()))
     def look_at_node(self, node_id: str) -> None:
-        """Read a node: its label, or NodeNotFoundError (from BFS and DFS too) if it isn't there."""
-        assert self.graph.has_node(node_id) == (node_id in self.labels)
-        if node_id not in self.labels:
-            with pytest.raises(NodeNotFoundError):
-                self.graph.get_node(node_id)
-            with pytest.raises(NodeNotFoundError):
-                self.graph.get_neighbors(node_id)
-            with pytest.raises(NodeNotFoundError):
-                bfs(self.graph, node_id)
-            with pytest.raises(NodeNotFoundError):
-                dfs(self.graph, node_id)
+        """Read a node: its label and properties, or NodeNotFoundError from every lookup."""
+        assert self.graph.has_node(node_id) == (node_id in self.node_notes)
+        if node_id in self.node_notes:
+            node = self.graph.get_node(node_id)
+            assert (node.label, node.properties) == self.node_notes[node_id]
             return
-        assert self.graph.get_node(node_id).label == self.labels[node_id]
+        for lookup in (
+            self.graph.get_node,
+            self.graph.get_neighbors,
+            self.graph.get_outgoing_edges,
+            self.graph.get_incoming_edges,
+            self.graph.out_degree,
+            self.graph.in_degree,
+            self.graph.degree,
+        ):
+            with pytest.raises(NodeNotFoundError):
+                lookup(node_id)
+        for traverse in (bfs, dfs):
+            with pytest.raises(NodeNotFoundError):
+                traverse(self.graph, node_id)
 
     @rule(edge_id=st.one_of(edges, edge_names()))
     def look_at_edge(self, edge_id: str) -> None:
-        """Read an edge: where it starts and ends, or EdgeNotFoundError if it isn't there."""
-        assert self.graph.has_edge(edge_id) == (edge_id in self.ends)
-        if edge_id not in self.ends:
+        """Read an edge: its ends, type and properties, or EdgeNotFoundError if it isn't there."""
+        assert self.graph.has_edge(edge_id) == (edge_id in self.edge_notes)
+        if edge_id not in self.edge_notes:
             with pytest.raises(EdgeNotFoundError):
                 self.graph.get_edge(edge_id)
             return
         edge = self.graph.get_edge(edge_id)
-        assert (edge.source_id, edge.target_id) == self.ends[edge_id]
+        assert (edge.source_id, edge.target_id, edge.rel_type, edge.properties) == (
+            self.edge_notes[edge_id]
+        )
 
     @invariant()
     def same_nodes_and_edges(self) -> None:
         """After every step, the graph holds exactly the dicts' nodes and edges."""
-        assert self.graph.node_count == len(self.labels)
-        assert self.graph.edge_count == len(self.ends)
-        assert {n.node_id: n.label for n in self.graph.get_all_nodes()} == self.labels
-        assert {e.edge_id: (e.source_id, e.target_id) for e in self.graph.get_all_edges()} == (
-            self.ends
-        )
+        assert self.graph.node_count == len(self.node_notes)
+        assert self.graph.edge_count == len(self.edge_notes)
+        assert {
+            n.node_id: (n.label, n.properties) for n in self.graph.get_all_nodes()
+        } == self.node_notes
+        assert {
+            e.edge_id: (e.source_id, e.target_id, e.rel_type, e.properties)
+            for e in self.graph.get_all_edges()
+        } == self.edge_notes
 
     @invariant()
     def every_node_has_the_right_roads(self) -> None:
         """After every step, each node's edges, degrees and neighbours match the dicts."""
-        for node_id in self.labels:
-            leaving = {e for e, (source, _) in self.ends.items() if source == node_id}
-            arriving = {e for e, (_, target) in self.ends.items() if target == node_id}
+        for node_id in self.node_notes:
+            leaving = {e for e, note in self.edge_notes.items() if note[0] == node_id}
+            arriving = {e for e, note in self.edge_notes.items() if note[1] == node_id}
             assert {e.edge_id for e in self.graph.get_outgoing_edges(node_id)} == leaving
             assert {e.edge_id for e in self.graph.get_incoming_edges(node_id)} == arriving
             assert self.graph.out_degree(node_id) == len(leaving)
             assert self.graph.in_degree(node_id) == len(arriving)
             assert self.graph.degree(node_id) == len(leaving) + len(arriving)
-            outward = {self.ends[e][1] for e in leaving}
-            inward = {self.ends[e][0] for e in arriving}
+            outward = {self.edge_notes[e][1] for e in leaving}
+            inward = {self.edge_notes[e][0] for e in arriving}
             for direction, expected in [
                 ("outgoing", outward),
                 ("incoming", inward),
@@ -227,7 +284,7 @@ class GraphMachine(RuleBasedStateMachine):
     def traversals_reach_exactly_the_reachable_nodes(self) -> None:
         """After every step, BFS and DFS from every node visit exactly what the dicts can reach."""
         roads = self.roads()
-        for start in self.labels:
+        for start in self.node_notes:
             expected = reachable_from(roads, start)
             for traverse in (bfs, dfs):
                 visited = [node.node_id for node in traverse(self.graph, start)]
