@@ -121,9 +121,8 @@ class GraphMachine(RuleBasedStateMachine):
             with pytest.raises(DuplicateNodeError):
                 self.graph.add_node(node_id, label=label, properties=properties)
         else:
-            assert (
-                self.graph.add_node(node_id, label=label, properties=properties).node_id == node_id
-            )
+            node = self.graph.add_node(node_id, label=label, properties=properties)
+            assert node.node_id == node_id
             self.node_notes[node_id] = (label, dict(properties))
         return node_id
 

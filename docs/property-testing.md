@@ -2,13 +2,13 @@
 
 ## The Town Surveyor
 
-Picture a delivery robot that explores a town. It starts at one house and
-follows the one-way streets, visiting every place it can get to. That's
-[breadth-first search](concepts/traversal.md): a graph is the town, nodes
-are the places, and edges are the one-way roads.
+Picture a town of one-way streets. A graph is the town: nodes are the
+places, and edges are the one-way roads. PyGraphDB's `bfs`
+([breadth-first search](concepts/traversal.md)) explores it: it starts at
+one house and follows the streets, visiting every place it can get to.
 
-How would you check the robot works? The usual way: draw one little town
-(`a -> b -> c -> d`), send the robot out from `a`, and check it visits
+How would you check `bfs` works? The usual way: draw one little town
+(`a -> b -> c -> d`), run `bfs` from `a`, and check it visits
 `a, b, c, d`. That's an **example test**. It's useful, but it only tells
 you about the one town you thought of.
 
@@ -17,7 +17,7 @@ towns -- one house on its own, a road that loops straight back to where it
 started, two roads between the same two houses, places with names like
 `""` or `"🍕"` -- and for each town they check a single rule:
 
-> From any starting place, the robot visits every place you can get to,
+> From any starting place, BFS visits every place you can get to,
 > each one once, and nowhere else.
 
 That rule is a **property**. It doesn't say what any one town looks like.
@@ -38,7 +38,7 @@ tests, and the model check (more on that below) is in `tests/test_model.py`.
 ## A Property from PyGraphDB
 
 Here's the surveyor's rule for BFS, with the recipes it uses (the first
-three live in `tests/strategies.py`, shared with the model check):
+four live in `tests/strategies.py`, shared with the model check):
 
 ```python
 @dataclass(frozen=True)
@@ -114,9 +114,8 @@ Line by line:
   rule in one sentence, it probably isn't a good property yet.
 - **`graph_of(road_map)`** is a small helper that builds a real `Graph`
   with `add_node` and `add_edge`.
-- **The loop** sends the robot out from *every* place in the town, not
-  just one.
-- **The three `assert`s** are the rule, piece by piece: the robot starts
+- **The loop** runs BFS from *every* place in the town, not just one.
+- **The three `assert`s** are the rule, piece by piece: BFS starts
   where it was put; it never visits a place twice (a list with repeats is
   longer than the set made from it); and the places it visits are exactly
   the reachable ones -- none missing, none extra.
@@ -149,8 +148,8 @@ build another road. Bugs often hide in the *order* of steps -- knocking
 down a place that still has roads leading into it, say.
 
 So the surveyor has a second trick. They carry a notebook with two lists
-written by hand: every place (and its label), and every road (and where
-it starts and ends). After every single change to the town, they check
+written by hand: every place (its label and properties), and every road
+(where it starts and ends, its type and properties). After every single change to the town, they check
 the town against the notebook. If the two ever disagree, something's
 wrong with the town.
 
@@ -159,34 +158,34 @@ Here's part of the check in `tests/test_model.py`:
 
 ```python
 class GraphMachine(RuleBasedStateMachine):
-    """Play random adds, removes and lookups on a Graph and on two dicts side by side."""
+    """Play random adds, updates, removes and lookups on a Graph and on two dicts side by side."""
 
     nodes = Bundle("nodes")
-    edges = Bundle("edges")
 
     def __init__(self) -> None:
         """Make an empty graph and two empty dicts (the first nodes go in just below)."""
         super().__init__()
         self.graph = Graph()
-        self.labels: dict[str, str] = {}
-        self.ends: dict[str, tuple[str, str]] = {}
+        self.node_notes: dict[str, NodeNote] = {}
+        self.edge_notes: dict[str, EdgeNote] = {}
 
-    @rule(target=nodes, node_id=node_names(), label=labels())
-    def add_node(self, node_id: str, label: str) -> str:
+    @rule(target=nodes, node_id=node_names(), label=labels(), properties=property_bags())
+    def add_node(self, node_id: str, label: str, properties: dict[str, object]) -> str:
         """Add a node to both, or get DuplicateNodeError if the id is taken; remember the id."""
-        if node_id in self.labels:
+        if node_id in self.node_notes:
             with pytest.raises(DuplicateNodeError):
-                self.graph.add_node(node_id, label=label)
+                self.graph.add_node(node_id, label=label, properties=properties)
         else:
-            assert self.graph.add_node(node_id, label=label).node_id == node_id
-            self.labels[node_id] = label
+            node = self.graph.add_node(node_id, label=label, properties=properties)
+            assert node.node_id == node_id
+            self.node_notes[node_id] = (label, dict(properties))
         return node_id
 
     @invariant()
     def traversals_reach_exactly_the_reachable_nodes(self) -> None:
         """After every step, BFS and DFS from every node visit exactly what the dicts can reach."""
         roads = self.roads()
-        for start in self.labels:
+        for start in self.node_notes:
             expected = reachable_from(roads, start)
             for traverse in (bfs, dfs):
                 visited = [node.node_id for node in traverse(self.graph, start)]
@@ -204,17 +203,18 @@ Piece by piece:
 - **`RuleBasedStateMachine`** is Hypothesis's tool for testing things that
   change step by step. Hypothesis makes up a random **story** of steps and
   plays it.
-- **`self.graph`, `self.labels` and `self.ends`** are the town and the
-  notebook's two lists. Every story starts with the same five places
+- **`self.graph`, `self.node_notes` and `self.edge_notes`** are the town
+  and the notebook's two lists. Every story starts with the same five places
   (`a` to `e`) and no roads, added by one `@initialize` step in the real
   file.
 - **Each `@rule`** is one kind of step. It does the same thing to the
   graph and to the dicts, and checks what the graph answers: `add_node`
   must hand back the node it made, or raise `DuplicateNodeError` if the
-  dict already has that id. The real file has rules to add a node, add an
-  edge, relabel a node, remove a node (and every edge touching it), remove
-  an edge, and look up a node or an edge -- including ones that aren't
-  there, which must raise `NodeNotFoundError` or `EdgeNotFoundError`.
+  dict already has that id. The real file has rules to add a node or an
+  edge, update one (a new label or type, and some properties merged in),
+  remove a node (and every edge touching it), remove an edge, and look up
+  a node or an edge. A node that isn't there must raise
+  `NodeNotFoundError` from every lookup, BFS and DFS included.
 - **`nodes = Bundle("nodes")`** is a bag of ids used earlier in the story.
   `add_node` puts its id in the bag (`target=nodes`), and later rules pull
   ids out, so new roads join places that really exist (or used to).
@@ -275,7 +275,7 @@ E           )
 
 Look at how small that is. Hypothesis tried towns with up to five places and
 eight roads, then shrank the failure all the way down to **one place
-called `""`, with one road that loops straight back to it**. The robot
+called `""`, with one road that loops straight back to it**. BFS
 starts at `""`, but never writes it down as visited. So when it follows
 the loop, `""` looks brand new, and it visits it a second time:
 `['', '']`.
@@ -300,7 +300,9 @@ They pass.
 
 `test_a_loaded_graph_agrees_with_itself` loads random files shaped like
 save files and checks the graph that comes back is in one piece. On the
-real code, it failed (trimmed; it found the same bug a second way too):
+real code, it failed. Hypothesis found the bug two ways at once, so it
+printed both, each with a `|` down its left side to show which failure a
+line belongs to. Here's one:
 
 ```
     |     assert all(
@@ -314,23 +316,22 @@ real code, it failed (trimmed; it found the same bug a second way too):
 ```
 
 Two nodes, `""` and `"a"` (a card with no `node_id` gets the id `""`).
-Two edges, and neither card says an `edge_id`, so **both get the id `""`**.
-The first goes `"" -> ""`, the second `"a" -> ""`.
+Two edges with no `edge_id`, so **both get the id `""`**: the first goes
+`"" -> ""`, the second `"a" -> ""`.
 
 `Graph.from_dict` filed each edge in the list of all edges, and in its
-start node's own list of roads. The second edge replaced the first in the
-list of all edges, because they share an id -- but node `""`'s road list
-still said "edge `""` leaves me". So node `""` listed a road that really
-started at `"a"`. Remove that edge later, and looking up node `""`'s
-roads crashed with a `KeyError`.
+start node's road list. The second edge replaced the first in the list
+of all edges, because they share an id, but node `""`'s road list still
+said "edge `""` leaves me". So node `""` listed a road that really
+started at `"a"`, and removing that edge later crashed with a `KeyError`.
 
-`add_edge` already refuses a taken id, so the example tests, which only
-built graphs with `add_edge` or loaded files `save_graph` wrote, could
-never make two edges with one id. Only a file written by something else
-(or edited by hand) can, and the surveyor's random save files do that
-all the time.
+`add_edge` already refuses a taken id, so the example tests, which built
+graphs with `add_edge` or loaded files `save_graph` wrote, could never
+make two edges with one id. The surveyor's random save files do it all
+the time.
 
-The fix makes `from_dict` refuse a taken id, just like `add_edge`:
+The fix makes `from_dict` refuse a taken id, just like `add_edge`, and
+`load_graph` turns that into a `PersistenceError`:
 
 ```python
 if edge.edge_id in graph._edges:  # was: no check at all
@@ -338,16 +339,29 @@ if edge.edge_id in graph._edges:  # was: no check at all
     raise DuplicateEdgeError(msg)
 ```
 
-(and the same for two nodes with one id). `load_graph` turns it into a
-`PersistenceError` naming the file. The shrunk file is now an example
-test too, `test_from_dict_refuses_two_edges_with_one_id` in
-`tests/test_graph.py`.
+The shrunk file is now an ordinary example test in `tests/test_graph.py`:
 
-Two more loading bugs turned up the same way, each pinned as an example
-in `tests/test_persistence.py`: a file holding the single byte `0x80`
-(not UTF-8 text) crashed with `UnicodeDecodeError`, and
-`{"nodes": [], "edges": [{}]}` (an edge to a node that isn't there)
-crashed with `NodeNotFoundError`. Both now give a `PersistenceError`.
+```python
+def test_from_dict_refuses_two_edges_with_one_id(self) -> None:
+    """Two edges sharing an id raise DuplicateEdgeError, as add_edge does.
+
+    Regression: found by a property test. The second edge used to replace
+    the first in the edge list but not in its node's road list, so node
+    ``""`` listed an edge that started at ``"a"``.
+    """
+    data: dict[str, object] = {
+        "nodes": [{}, {"node_id": "a"}],
+        "edges": [{}, {"source_id": "a"}],
+    }
+    with pytest.raises(DuplicateEdgeError):
+        Graph.from_dict(data)
+```
+
+Two more loading bugs turned up the same way, pinned in
+`tests/test_persistence.py`: a file holding the single byte `0x80` (not
+UTF-8 text) crashed with `UnicodeDecodeError`, and
+`{"nodes": [], "edges": [{}]}` (an edge to a missing node) crashed with
+`NodeNotFoundError`. Both now give a `PersistenceError`.
 
 ## Run It Yourself
 
