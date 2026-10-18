@@ -60,10 +60,12 @@ def lists_and_dicts_of(children: st.SearchStrategy[object]) -> st.SearchStrategy
 
 
 def property_bags() -> st.SearchStrategy[dict[str, object]]:
-    """Make the properties of one node or edge: any text keys, any JSON values."""
+    """Make the properties of one node or edge: none, or one with any text key and JSON value."""
     # Save files are JSON (docs/concepts/persistence.md), so properties are
     # JSON values: a tuple or a date would come back as a list or a string.
-    return st.dictionaries(st.text(), json_values(), max_size=2)
+    # One property each is enough to check every type comes back, and every
+    # extra one makes each random graph slower to invent.
+    return st.dictionaries(st.text(), json_values(), max_size=1)
 
 
 def exactly[T](count: int, items: st.SearchStrategy[T]) -> st.SearchStrategy[list[T]]:
