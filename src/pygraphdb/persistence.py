@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import cast
 
 from pygraphdb.atomic import atomic_write_text
-from pygraphdb.errors import PersistenceError
+from pygraphdb.errors import GraphError, PersistenceError
 from pygraphdb.graph import Graph
 
 # Every real save file has these top-level keys; anything else isn't one of ours.
@@ -94,7 +94,9 @@ def load_graph(file_path: str | Path) -> Graph:
         raise PersistenceError(msg)
     try:
         return Graph.from_dict(saved)
-    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+    # GraphError covers an edge whose end isn't one of the saved nodes: a file
+    # that can't be a real save, so it's refused like any other bad file.
+    except (GraphError, KeyError, TypeError, ValueError, AttributeError) as exc:
         msg = f"{path} is not a valid save file: {exc}"
         raise PersistenceError(msg) from exc
 

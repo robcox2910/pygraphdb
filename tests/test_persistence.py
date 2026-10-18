@@ -171,6 +171,16 @@ class TestUnreadableSaveFiles:
         with pytest.raises(PersistenceError, match=r"too_deep\.json"):
             load_graph(path)
 
+    def test_edge_to_a_missing_node_raises_persistence_error(self, tmp_path: Path) -> None:
+        """An edge whose end isn't one of the saved nodes is a PersistenceError naming the file.
+
+        Regression: found by a property test, which shrank it to one empty edge.
+        """
+        path = tmp_path / "saved.json"
+        path.write_text('{"nodes": [], "edges": [{}]}', encoding="utf-8")
+        with pytest.raises(PersistenceError, match=r"saved\.json"):
+            load_graph(path)
+
     def test_persistence_error_is_part_of_the_library_errors(self) -> None:
         """PersistenceError belongs to the library's own family of errors."""
         assert issubclass(PersistenceError, GraphError)
