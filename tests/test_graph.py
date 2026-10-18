@@ -343,6 +343,26 @@ class TestGraphSerialization:
         with pytest.raises(NodeNotFoundError):
             Graph.from_dict(data)
 
+    def test_from_dict_refuses_two_edges_with_one_id(self) -> None:
+        """Two edges sharing an id raise DuplicateEdgeError, as add_edge does.
+
+        Regression: found by a property test. The second edge used to replace
+        the first in the edge list but not in its node's road list, so node
+        ``""`` listed an edge that started at ``"a"``.
+        """
+        data: dict[str, object] = {
+            "nodes": [{}, {"node_id": "a"}],
+            "edges": [{}, {"source_id": "a"}],
+        }
+        with pytest.raises(DuplicateEdgeError):
+            Graph.from_dict(data)
+
+    def test_from_dict_refuses_two_nodes_with_one_id(self) -> None:
+        """Two nodes sharing an id raise DuplicateNodeError, as add_node does."""
+        data: dict[str, object] = {"nodes": [{"node_id": "a"}, {"node_id": "a"}], "edges": []}
+        with pytest.raises(DuplicateNodeError):
+            Graph.from_dict(data)
+
 
 class _NoFullScans(dict[str, object]):
     """An edge dictionary that refuses to be scanned from end to end."""

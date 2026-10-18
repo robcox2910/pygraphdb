@@ -94,8 +94,9 @@ def load_graph(file_path: str | Path) -> Graph:
         raise PersistenceError(msg)
     try:
         return Graph.from_dict(saved)
-    # GraphError covers an edge whose end isn't one of the saved nodes: a file
-    # that can't be a real save, so it's refused like any other bad file.
+    # GraphError covers an edge whose end isn't one of the saved nodes, and two
+    # nodes or edges sharing an id: files save_graph never writes, so they're
+    # refused like any other bad file.
     except (GraphError, KeyError, TypeError, ValueError, AttributeError) as exc:
         msg = f"{path} is not a valid save file: {exc}"
         raise PersistenceError(msg) from exc

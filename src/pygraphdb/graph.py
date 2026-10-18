@@ -470,6 +470,8 @@ class Graph:
         Raises:
             NodeNotFoundError: If an edge refers to a node that is not
                 present in the data.
+            DuplicateNodeError: If two nodes share an id.
+            DuplicateEdgeError: If two edges share an id.
 
         """
         graph = cls()
@@ -479,12 +481,21 @@ class Graph:
             for item in raw_nodes:  # pyright: ignore[reportUnknownVariableType]
                 if isinstance(item, dict):
                     node_data: dict[str, object] = {str(k): v for k, v in item.items()}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
-                    graph._store_node(Node.from_dict(node_data))
+                    node = Node.from_dict(node_data)
+                    if node.node_id in graph._nodes:
+                        msg = f"Node '{node.node_id}' already exists"
+                        raise DuplicateNodeError(msg)
+                    graph._store_node(node)
         if isinstance(raw_edges, list):
             for item in raw_edges:  # pyright: ignore[reportUnknownVariableType]
                 if isinstance(item, dict):
                     edge_data: dict[str, object] = {str(k): v for k, v in item.items()}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
                     edge = Edge.from_dict(edge_data)
+                    # A second edge with the same id would replace the first in
+                    # the edge list but not in its node's road list.
+                    if edge.edge_id in graph._edges:
+                        msg = f"Edge '{edge.edge_id}' already exists"
+                        raise DuplicateEdgeError(msg)
                     if edge.source_id not in graph._nodes:
                         msg = f"Source node '{edge.source_id}' not found"
                         raise NodeNotFoundError(msg)
