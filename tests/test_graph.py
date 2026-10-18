@@ -358,7 +358,11 @@ class TestGraphSerialization:
             Graph.from_dict(data)
 
     def test_from_dict_refuses_two_nodes_with_one_id(self) -> None:
-        """Two nodes sharing an id raise DuplicateNodeError, as add_node does."""
+        """Two nodes sharing an id raise DuplicateNodeError, as add_node does.
+
+        The second node used to win quietly, which broke nothing; it's refused
+        for symmetry with add_node, which refuses a taken id too.
+        """
         data: dict[str, object] = {"nodes": [{"node_id": "a"}, {"node_id": "a"}], "edges": []}
         with pytest.raises(DuplicateNodeError):
             Graph.from_dict(data)
