@@ -19,6 +19,8 @@ Example:
 
 """
 
+import copy
+
 from pygraphdb.edge import Edge
 from pygraphdb.errors import (
     DuplicateEdgeError,
@@ -110,7 +112,8 @@ class Graph:
         if node_id in self._nodes:
             msg = f"Node '{node_id}' already exists"
             raise DuplicateNodeError(msg)
-        node = Node(node_id=node_id, label=label, properties=properties or {})
+        # Keep our own copy, so changing the caller's dict later can't reach in.
+        node = Node(node_id=node_id, label=label, properties=copy.deepcopy(properties or {}))
         self._store_node(node)
         return node
 
@@ -169,7 +172,7 @@ class Graph:
         if label is not None:
             node.label = label
         if properties is not None:
-            node.properties.update(properties)
+            node.properties.update(copy.deepcopy(properties))
         return node
 
     def remove_node(self, node_id: str) -> Node:
@@ -246,7 +249,7 @@ class Graph:
             source_id=source_id,
             target_id=target_id,
             rel_type=rel_type,
-            properties=properties or {},
+            properties=copy.deepcopy(properties or {}),  # our own copy, as in add_node
         )
         self._store_edge(edge)
         return edge
@@ -306,7 +309,7 @@ class Graph:
         if rel_type is not None:
             edge.rel_type = rel_type
         if properties is not None:
-            edge.properties.update(properties)
+            edge.properties.update(copy.deepcopy(properties))
         return edge
 
     def remove_edge(self, edge_id: str) -> Edge:

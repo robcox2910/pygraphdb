@@ -446,3 +446,30 @@ class TestAdjacencyIndex:
         assert [n.node_id for n in loaded.get_neighbors("a")] == ["b"]
         loaded.remove_node("b")
         assert loaded.get_outgoing_edges("a") == []
+
+
+class TestGraphKeepsItsOwnCopy:
+    """Changing the dict you passed in afterwards never reaches inside the graph."""
+
+    def test_add_node_keeps_its_own_copy_of_the_properties(self) -> None:
+        """Regression: add_node used to store the caller's dict itself, so later edits leaked in."""
+        properties: dict[str, object] = {"tags": ["red"]}
+        graph = Graph()
+        graph.add_node("a", properties=properties)
+        properties["name"] = "Zed"
+        tags = properties["tags"]
+        assert isinstance(tags, list)
+        tags.append("blue")
+        assert graph.get_node("a").properties == {"tags": ["red"]}
+
+    def test_add_edge_keeps_its_own_copy_of_the_properties(self) -> None:
+        """Regression: add_edge used to store the caller's dict itself, so later edits leaked in."""
+        properties: dict[str, object] = {"tags": ["red"]}
+        graph = Graph()
+        graph.add_node("a")
+        graph.add_edge("e", "a", "a", properties=properties)
+        properties["since"] = 2024
+        tags = properties["tags"]
+        assert isinstance(tags, list)
+        tags.append("blue")
+        assert graph.get_edge("e").properties == {"tags": ["red"]}
