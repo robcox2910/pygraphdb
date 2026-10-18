@@ -473,3 +473,26 @@ class TestGraphKeepsItsOwnCopy:
         assert isinstance(tags, list)
         tags.append("blue")
         assert graph.get_edge("e").properties == {"tags": ["red"]}
+
+
+class TestIdsAreReadOnly:
+    """The ids that file a node or edge in the graph's indexes can't be changed afterwards."""
+
+    def test_a_node_id_cannot_be_changed(self) -> None:
+        """Changing a stored node's id raises AttributeError, so the index can't go stale."""
+        graph = Graph()
+        node = graph.add_node("a")
+        with pytest.raises(AttributeError):
+            node.node_id = "b"
+        assert graph.get_node("a").node_id == "a"
+
+    @pytest.mark.parametrize("field", ["edge_id", "source_id", "target_id"])
+    def test_an_edge_id_or_end_cannot_be_changed(self, field: str) -> None:
+        """Regression: ``add_edge("e", "a", "b").target_id = "c"`` used to corrupt the road lists."""
+        graph = Graph()
+        graph.add_node("a")
+        graph.add_node("b")
+        edge = graph.add_edge("e", "a", "b")
+        with pytest.raises(AttributeError):
+            setattr(edge, field, "c")
+        assert (edge.edge_id, edge.source_id, edge.target_id) == ("e", "a", "b")

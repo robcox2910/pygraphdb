@@ -27,6 +27,9 @@ Example:
 
 from dataclasses import dataclass, field
 
+# The fields the graph files an edge under; they can't change once set.
+_FIXED_FIELDS = frozenset({"edge_id", "source_id", "target_id"})
+
 
 @dataclass
 class Edge:
@@ -36,6 +39,7 @@ class Edge:
     - ``edge_id`` is a unique label for this arrow
     - ``source_id`` is where the arrow starts (the "from" node)
     - ``target_id`` is where the arrow points (the "to" node)
+    - those three can't be changed once the edge is made
     - ``rel_type`` is what the arrow means ("FRIENDS_WITH", "LIKES", etc.)
     - ``properties`` is extra info about the relationship
 
@@ -53,6 +57,23 @@ class Edge:
     target_id: str
     rel_type: str = ""
     properties: dict[str, object] = field(default_factory=lambda: {})
+
+    def __setattr__(self, name: str, value: object) -> None:
+        """Set an attribute, except the id or either end once they've been set.
+
+        The graph files every edge under its id, and in the road lists of
+        the two nodes it joins. Changing any of those afterwards would leave
+        the edge filed in the wrong places -- so it isn't allowed.
+
+        Raises:
+            AttributeError: If ``edge_id``, ``source_id`` or ``target_id`` is
+                set a second time.
+
+        """
+        if name in _FIXED_FIELDS and name in self.__dict__:
+            msg = f"an edge's {name} can't be changed: it files the edge in the graph"
+            raise AttributeError(msg)
+        super().__setattr__(name, value)
 
     def has_property(self, key: str) -> bool:
         """Check whether this edge has a given property key.
