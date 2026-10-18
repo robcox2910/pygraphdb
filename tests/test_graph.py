@@ -343,6 +343,30 @@ class TestGraphSerialization:
         with pytest.raises(NodeNotFoundError):
             Graph.from_dict(data)
 
+    def test_from_dict_refuses_two_edges_with_one_id(self) -> None:
+        """Two edges sharing an id raise DuplicateEdgeError, as add_edge does.
+
+        Regression: found by a property test. The second edge used to replace
+        the first in the edge list but not in its node's road list, so node
+        ``""`` listed an edge that started at ``"a"``.
+        """
+        data: dict[str, object] = {
+            "nodes": [{}, {"node_id": "a"}],
+            "edges": [{}, {"source_id": "a"}],
+        }
+        with pytest.raises(DuplicateEdgeError):
+            Graph.from_dict(data)
+
+    def test_from_dict_refuses_two_nodes_with_one_id(self) -> None:
+        """Two nodes sharing an id raise DuplicateNodeError, as add_node does.
+
+        The second node used to win quietly, which broke nothing; it's refused
+        for symmetry with add_node, which refuses a taken id too.
+        """
+        data: dict[str, object] = {"nodes": [{"node_id": "a"}, {"node_id": "a"}], "edges": []}
+        with pytest.raises(DuplicateNodeError):
+            Graph.from_dict(data)
+
 
 class _NoFullScans(dict[str, object]):
     """An edge dictionary that refuses to be scanned from end to end."""
@@ -426,3 +450,53 @@ class TestAdjacencyIndex:
         assert [n.node_id for n in loaded.get_neighbors("a")] == ["b"]
         loaded.remove_node("b")
         assert loaded.get_outgoing_edges("a") == []
+
+
+class TestGraphKeepsItsOwnCopy:
+    """Changing the dict you passed in afterwards never reaches inside the graph."""
+
+    def test_add_node_keeps_its_own_copy_of_the_properties(self) -> None:
+        """Regression: add_node used to store the caller's dict itself, so later edits leaked in."""
+        properties: dict[str, object] = {"tags": ["red"]}
+        graph = Graph()
+        graph.add_node("a", properties=properties)
+        properties["name"] = "Zed"
+        tags = properties["tags"]
+        assert isinstance(tags, list)
+        tags.append("blue")
+        assert graph.get_node("a").properties == {"tags": ["red"]}
+
+    def test_add_edge_keeps_its_own_copy_of_the_properties(self) -> None:
+        """Regression: add_edge used to store the caller's dict itself, so later edits leaked in."""
+        properties: dict[str, object] = {"tags": ["red"]}
+        graph = Graph()
+        graph.add_node("a")
+        graph.add_edge("e", "a", "a", properties=properties)
+        properties["since"] = 2024
+        tags = properties["tags"]
+        assert isinstance(tags, list)
+        tags.append("blue")
+        assert graph.get_edge("e").properties == {"tags": ["red"]}
+
+
+class TestIdsAreReadOnly:
+    """The ids that file a node or edge in the graph's indexes can't be changed afterwards."""
+
+    def test_a_node_id_cannot_be_changed(self) -> None:
+        """Changing a stored node's id raises AttributeError, so the index can't go stale."""
+        graph = Graph()
+        node = graph.add_node("a")
+        with pytest.raises(AttributeError):
+            node.node_id = "b"
+        assert graph.get_node("a").node_id == "a"
+
+    @pytest.mark.parametrize("field", ["edge_id", "source_id", "target_id"])
+    def test_an_edge_id_or_end_cannot_be_changed(self, field: str) -> None:
+        """Regression: ``add_edge("e", "a", "b").target_id = "c"`` used to corrupt the road lists."""
+        graph = Graph()
+        graph.add_node("a")
+        graph.add_node("b")
+        edge = graph.add_edge("e", "a", "b")
+        with pytest.raises(AttributeError):
+            setattr(edge, field, "c")
+        assert (edge.edge_id, edge.source_id, edge.target_id) == ("e", "a", "b")

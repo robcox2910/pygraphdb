@@ -26,7 +26,8 @@ class Node:
     """A single entity in the graph with an ID, label, and properties.
 
     Think of a node like a person at a party:
-    - ``node_id`` is their unique wristband number (no two people share one)
+    - ``node_id`` is their unique wristband number (no two people share one,
+      and it can't be changed once it's on)
     - ``label`` is the group they belong to ("Student", "Teacher", "Parent")
     - ``properties`` is everything about them (name, age, hobbies)
 
@@ -40,6 +41,22 @@ class Node:
     node_id: str
     label: str = ""
     properties: dict[str, object] = field(default_factory=lambda: {})
+
+    def __setattr__(self, name: str, value: object) -> None:
+        """Set an attribute, except ``node_id`` once it has been set.
+
+        The graph files every node under its id. Changing the id afterwards
+        would leave the node filed under the old one, like swapping your
+        wristband after the guest list was written -- so it isn't allowed.
+
+        Raises:
+            AttributeError: If ``node_id`` is set a second time.
+
+        """
+        if name == "node_id" and "node_id" in self.__dict__:
+            msg = "a node's node_id can't be changed: it files the node in the graph"
+            raise AttributeError(msg)
+        super().__setattr__(name, value)
 
     def has_property(self, key: str) -> bool:
         """Check whether this node has a given property key.

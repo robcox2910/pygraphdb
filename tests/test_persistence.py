@@ -11,6 +11,10 @@ from pygraphdb.persistence import graph_from_json, graph_to_json, load_graph, sa
 
 TWO_NODES = 2
 ONE_EDGE = 1
+# Python refuses to read a whole number with more than 4,300 digits
+# (sys.get_int_max_str_digits()), and JSON nested this deep overflows its stack.
+TOO_MANY_DIGITS = 5000
+TOO_DEEP = 100_000
 
 
 def _build_simple_graph() -> Graph:
@@ -140,6 +144,40 @@ class TestUnreadableSaveFiles:
         """Valid JSON that isn't a saved graph is a PersistenceError."""
         path = tmp_path / "saved.json"
         path.write_text('{"something": "else"}', encoding="utf-8")
+        with pytest.raises(PersistenceError, match=r"saved\.json"):
+            load_graph(path)
+
+    def test_load_file_that_is_not_utf8_text_raises(self, tmp_path: Path) -> None:
+        """A file that isn't UTF-8 text is a PersistenceError that names the file.
+
+        Regression: found by a property test, which shrank it to one byte.
+        """
+        path = tmp_path / "not_text.json"
+        path.write_bytes(b"\x80")
+        with pytest.raises(PersistenceError, match=r"not_text\.json"):
+            load_graph(path)
+
+    def test_load_number_too_long_for_python_raises(self, tmp_path: Path) -> None:
+        """A number with too many digits to read is a PersistenceError that names the file."""
+        path = tmp_path / "long_number.json"
+        path.write_text("1" * TOO_MANY_DIGITS, encoding="utf-8")
+        with pytest.raises(PersistenceError, match=r"long_number\.json"):
+            load_graph(path)
+
+    def test_load_json_nested_too_deep_raises(self, tmp_path: Path) -> None:
+        """Lists nested too deep to read are a PersistenceError that names the file."""
+        path = tmp_path / "too_deep.json"
+        path.write_text("[" * TOO_DEEP, encoding="utf-8")
+        with pytest.raises(PersistenceError, match=r"too_deep\.json"):
+            load_graph(path)
+
+    def test_edge_to_a_missing_node_raises_persistence_error(self, tmp_path: Path) -> None:
+        """An edge whose end isn't one of the saved nodes is a PersistenceError naming the file.
+
+        Regression: found by a property test, which shrank it to one empty edge.
+        """
+        path = tmp_path / "saved.json"
+        path.write_text('{"nodes": [], "edges": [{}]}', encoding="utf-8")
         with pytest.raises(PersistenceError, match=r"saved\.json"):
             load_graph(path)
 
