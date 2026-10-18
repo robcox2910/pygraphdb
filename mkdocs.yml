@@ -48,6 +48,7 @@ nav:
   - Persistence -- Saving Your Graph: concepts/persistence.md
   - Queries -- Asking Questions About Your Network: concepts/queries.md
   - Traversal -- Exploring a Maze: concepts/traversal.md
+  - Property Testing -- The Town Surveyor: property-testing.md
   # series-nav:start
   - The series:
       - Series home: https://robcox2910.github.io/
