@@ -36,3 +36,11 @@ In this project, you'll build your own graph database from scratch:
 6. How to write queries (questions) in a language similar to Neo4j's Cypher
 
 Let's get started!
+
+## Install
+
+```bash
+pip install fromscratch-pygraphdb
+```
+
+Or get the whole series at once with `pip install fromscratch-pystack`. To read the code or run the tests, clone it from [GitHub](https://github.com/robcox2910/pygraphdb).
