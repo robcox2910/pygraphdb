@@ -1,5 +1,5 @@
 [project]
-name = "pygraphdb"
+name = "fromscratch-pygraphdb"
 dynamic = ["version"]
 description = "An educational graph database library built from scratch in Python"
 readme = "README.md"
