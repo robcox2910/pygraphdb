@@ -1,4 +1,8 @@
-# What is a Graph Database?
+---
+title: "Build your own graph database in Python"
+---
+
+# PyGraphDB: Build your own graph database in Python
 
 ## The Social Network Analogy
 
